@@ -1,0 +1,14 @@
+{
+  "name": "discord-moderator-bot",
+  "version": "1.0.0",
+  "description": "Discord moderation bot for link filtering and warning tracking",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5"
+  }
+}
