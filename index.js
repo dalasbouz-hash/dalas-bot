@@ -78,6 +78,26 @@ function addWarning(userId, guildId) {
   return warns[key];
 }
 
+// Delete all messages from a user in the last 24 hours across all channels
+async function deleteUserRecentMessages(userId, guild) {
+  const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const channels = guild.channels.cache.filter(c => c.isTextBased && c.isTextBased());
+  let totalDeleted = 0;
+  for (const [, channel] of channels) {
+    try {
+      const messages = await channel.messages.fetch({ limit: 100 });
+      const userMessages = messages.filter(
+        m => m.author.id === userId && m.createdTimestamp > twentyFourHoursAgo
+      );
+      for (const [, msg] of userMessages) {
+        await msg.delete().catch(() => {});
+        totalDeleted++;
+      }
+    } catch (e) { /* skip channels without access */ }
+  }
+  console.log(`🗑️ Deleted ${totalDeleted} messages from user ${userId} in the last 24h.`);
+}
+
 // Progressive timeout handler when a user gets multiple warnings
 async function handleWarningsAndTimeout(message, warnCount) {
   if (warnCount >= 3) {
@@ -114,6 +134,8 @@ async function handleWarningsAndTimeout(message, warnCount) {
         try {
           await member.timeout(duration, `Accumulated ${warnCount} warnings`);
           await message.channel.send(`⛔ <@${member.id}> has been timed out for **${durationText}** after receiving warning \`${warnCount}\`.`);
+          // Delete all their messages from the last 24h
+          await deleteUserRecentMessages(member.id, message.guild);
         } catch (err) {
           console.error('Failed to timeout member:', err);
           await message.channel.send(`⚠️ Could not timeout <@${member.id}>. Please check if the bot has "Moderate Members" permissions and is placed higher than their role.`);
@@ -418,7 +440,7 @@ function runDailyScheduler() {
   }
 }
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`✅ Bot is online! Logged in as ${client.user.tag}`);
   console.log('🤖 Auto-Moderation, Clips, and Memes systems initialized.');
   
@@ -449,6 +471,36 @@ client.on('messageCreate', async (message) => {
       return message.reply('❌ You must be an Administrator to run this command.');
     }
     await selectAndAnnounceMemeOfTheDay(message.channel);
+    return;
+  }
+
+  if (message.content.startsWith('!cleanup')) {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return message.reply('❌ You must be an Administrator to run this command.');
+    }
+    const statusMsg = await message.channel.send('🧹 Cleaning up bot messages from the last 24 hours...');
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+    let totalDeleted = 0;
+    try {
+      const channels = message.guild.channels.cache.filter(c => c.isTextBased && c.isTextBased());
+      for (const [, channel] of channels) {
+        try {
+          const messages = await channel.messages.fetch({ limit: 100 });
+          const botMessages = messages.filter(
+            m => m.author.id === client.user.id && m.createdTimestamp > twentyFourHoursAgo
+          );
+          for (const [, msg] of botMessages) {
+            await msg.delete().catch(() => {});
+            totalDeleted++;
+          }
+        } catch (e) { /* skip channels without access */ }
+      }
+      await statusMsg.edit(`✅ Done! Deleted **${totalDeleted}** bot message(s) from the last 24 hours.`);
+      setTimeout(() => statusMsg.delete().catch(() => {}), 10000);
+    } catch (err) {
+      console.error('Cleanup error:', err);
+      await statusMsg.edit('❌ An error occurred during cleanup.');
+    }
     return;
   }
 
@@ -519,6 +571,8 @@ client.on('messageCreate', async (message) => {
           `🔇 <@${message.author.id}> you cannot send messages in this channel! You have been timed out for **24 hours**.`
         );
         setTimeout(() => warn.delete().catch(() => {}), 10000);
+        // Delete all their messages from the last 24h
+        await deleteUserRecentMessages(member.id, message.guild);
       }
     } catch (err) {
       console.error('Failed to handle read-only channel message:', err);
